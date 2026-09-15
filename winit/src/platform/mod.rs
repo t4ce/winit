@@ -27,6 +27,8 @@ pub use winit_android as android;
 pub use winit_appkit as macos;
 #[cfg(orbital_platform)]
 pub use winit_orbital as orbital;
+#[cfg(trueos_platform)]
+pub use winit_trueos as trueos;
 #[cfg(ios_platform)]
 pub use winit_uikit as ios;
 #[cfg(wayland_platform)]

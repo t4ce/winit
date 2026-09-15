@@ -16,7 +16,8 @@ fn main() {
         macos_platform: { target_os = "macos" },
         ios_platform: { all(target_vendor = "apple", not(target_os = "macos")) },
         windows_platform: { target_os = "windows" },
-        free_unix: { all(unix, not(target_vendor = "apple"), not(android_platform), not(target_os = "emscripten")) },
+        trueos_platform: { target_os = "trueos" },
+        free_unix: { all(unix, not(target_os = "trueos"), not(target_vendor = "apple"), not(android_platform), not(target_os = "emscripten")) },
         redox: { target_os = "redox" },
 
         // Native displays.

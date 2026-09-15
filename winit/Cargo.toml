@@ -100,7 +100,7 @@ winit-uikit.workspace = true
 winit-win32.workspace = true
 
 # Linux
-[target.'cfg(all(unix, not(any(target_os = "redox", target_family = "wasm", target_os = "android", target_vendor = "apple"))))'.dependencies]
+[target.'cfg(all(unix, not(any(target_os = "redox", target_os = "trueos", target_family = "wasm", target_os = "android", target_vendor = "apple"))))'.dependencies]
 libc.workspace = true
 rustix = { workspace = true, features = ["std", "thread"] }
 winit-common = { workspace = true, features = ["xkb"] }
@@ -109,6 +109,9 @@ winit-x11 = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "redox")'.dependencies]
 winit-orbital.workspace = true
+
+[target.'cfg(target_os = "trueos")'.dependencies]
+winit-trueos.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 winit-web.workspace = true

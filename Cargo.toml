@@ -19,6 +19,7 @@ winit-appkit = { version = "=0.31.0-beta.3", path = "winit-appkit" }
 winit-common = { version = "=0.31.0-beta.3", path = "winit-common" }
 winit-core = { version = "=0.31.0-beta.3", path = "winit-core" }
 winit-orbital = { version = "=0.31.0-beta.3", path = "winit-orbital" }
+winit-trueos = { version = "=0.31.0-beta.3", path = "winit-trueos" }
 winit-uikit = { version = "=0.31.0-beta.3", path = "winit-uikit" }
 winit-wayland = { version = "=0.31.0-beta.3", path = "winit-wayland", default-features = false }
 winit-web = { version = "=0.31.0-beta.3", path = "winit-web" }
@@ -32,7 +33,7 @@ cursor-icon = "1.1.0"
 dpi = { version = "0.1.2", path = "dpi" }
 keyboard-types = "0.8.0"
 mint = "0.5.6"
-rwh_06 = { package = "raw-window-handle", version = "0.6", features = ["std"] }
+rwh_06 = { package = "raw-window-handle", version = "0.6", path = "../raw-window-handle", features = ["std"] }
 serde = { version = "1", features = ["serde_derive"] }
 smol_str = "0.3"
 tracing = { version = "0.1.40", default-features = false }
@@ -96,3 +97,6 @@ wasm-bindgen-futures = "0.4.43"
 wasm-bindgen-test = "0.3"
 web-time = "1"
 web_sys = { package = "web-sys", version = "0.3.70" }
+
+[patch.crates-io]
+raw-window-handle = { path = "../raw-window-handle" }

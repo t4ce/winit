@@ -282,6 +282,7 @@ impl AsRawFd for EventLoop {
     orbital_platform,
     x11_platform,
     wayland_platform,
+    trueos_platform,
     docsrs,
 ))]
 impl winit_core::event_loop::pump_events::EventLoopExtPumpEvents for EventLoop {
@@ -302,6 +303,7 @@ impl winit_core::event_loop::pump_events::EventLoopExtPumpEvents for EventLoop {
     orbital_platform,
     x11_platform,
     wayland_platform,
+    trueos_platform,
     docsrs,
 ))]
 impl winit_core::event_loop::run_on_demand::EventLoopExtRunOnDemand for EventLoop {

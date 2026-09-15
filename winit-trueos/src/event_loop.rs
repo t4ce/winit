@@ -218,10 +218,10 @@ impl EventLoop {
         }
         app.about_to_wait(&self.active)
     }
-}
-impl EventLoopProvider for EventLoop {
-    fn run_app<A: ApplicationHandler + 'static>(self, mut app: A) -> Result<(), EventLoopError> {
-        self.iteration(&mut app, StartCause::Init, true);
+
+    fn run_app_inner<A: ApplicationHandler>(&mut self, app: &mut A) {
+        self.active.exiting.store(false, Ordering::Release);
+        self.iteration(app, StartCause::Init, true);
         while !self.active.exiting() {
             let start = Instant::now();
             let flow = *self.active.control.lock().unwrap();
@@ -252,8 +252,24 @@ impl EventLoopProvider for EventLoop {
                     }
                 },
             };
-            self.iteration(&mut app, cause, false)
+            self.iteration(app, cause, false)
         }
+    }
+
+    pub fn run_app_on_demand<A: ApplicationHandler>(
+        &mut self,
+        mut app: A,
+    ) -> Result<(), EventLoopError> {
+        self.run_app_inner(&mut app);
+        Ok(())
+    }
+}
+impl EventLoopProvider for EventLoop {
+    fn run_app<A: ApplicationHandler + 'static>(
+        mut self,
+        mut app: A,
+    ) -> Result<(), EventLoopError> {
+        self.run_app_inner(&mut app);
         Ok(())
     }
     fn create_proxy(&self) -> CoreEventLoopProxy {

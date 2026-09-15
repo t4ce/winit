@@ -9,6 +9,7 @@ mod window;
 pub use event_loop::{
     ActiveEventLoop, EventLoop, EventLoopProxy, PlatformSpecificEventLoopAttributes,
 };
+pub use input::{physicalkey_to_scancode, scancode_to_physicalkey};
 pub use window::Window;
 use winit_core::window::Window as CoreWindow;
 pub trait WindowExtTrueOS {

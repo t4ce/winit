@@ -9,6 +9,7 @@ name = "winit"
 repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
+workspace = ".."
 
 [package.metadata.docs.rs]
 features = [

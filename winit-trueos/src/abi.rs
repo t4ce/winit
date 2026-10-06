@@ -1,7 +1,7 @@
 //! Stable copies of the UI4 event records consumed by this backend.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct PointerEvent {
+pub struct PointerEvent {
     pub controller_id: u32,
     pub slot_id: u32,
     pub ep_target: u32,
@@ -21,7 +21,7 @@ pub(crate) struct PointerEvent {
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct KeyboardOutputEvent {
+pub struct KeyboardOutputEvent {
     pub t_ms: u32,
     pub seq: u32,
     pub device_seq: u32,
@@ -37,6 +37,24 @@ pub(crate) struct KeyboardOutputEvent {
     pub codepoint: u32,
     pub utf8: [u8; 4],
     pub flags: u32,
+}
+/// Native UI4 pan record. Phase is 1 (begin), 2 (update), or 3 (end).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PanEvent {
+    pub controller_id: u32,
+    pub slot_id: u32,
+    pub ep_target: u32,
+    pub hid_kind: u32,
+    pub phase: u32,
+    pub x: u32,
+    pub y: u32,
+    pub local_x: i32,
+    pub local_y: i32,
+    pub dx: i32,
+    pub dy: i32,
+    pub combo_id: u32,
+    pub vcursor: u32,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -84,6 +102,7 @@ unsafe extern "C" {
         id: u32,
         out: *mut KeyboardOutputEvent,
     ) -> i32;
+    pub(crate) fn trueos_cabi_ui4_scene_pan_event_take(id: u32, out: *mut PanEvent) -> i32;
     pub(crate) fn trueos_cabi_ui4_scene_pointer_event_take(id: u32, out: *mut PointerEvent) -> i32;
     pub(crate) fn trueos_cabi_ui4_scene_window_state_get_v1(
         id: u32,
@@ -215,5 +234,70 @@ mod tests {
         assert_eq!(core::mem::size_of::<KeyboardOutputEvent>(), 44);
         assert_eq!(core::mem::size_of::<ResizeEvent>(), 16);
         assert_eq!(core::mem::size_of::<PointerEvent>(), 64);
+        assert_eq!(core::mem::size_of::<PanEvent>(), 52);
+        assert_eq!(core::mem::size_of::<CursorEvent>(), 56);
     }
+}
+
+#[cfg(not(target_os = "trueos"))]
+pub(crate) unsafe fn trueos_cabi_ui4_scene_pan_event_take(_: u32, _: *mut PanEvent) -> i32 {
+    1
+}
+
+/// Global HID cursor sequence record. reserved0 bit 0 marks signed relative
+/// dx/dy in reserved1/reserved2; x/y are desktop coordinates, not raw deltas.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CursorEvent {
+    pub t_ms: u32,
+    pub seq: u32,
+    pub controller_id: u32,
+    pub slot_id: u32,
+    pub ep_target: u32,
+    pub hid_kind: u8,
+    pub reserved0: u8,
+    pub reserved1: u16,
+    pub buttons_down: u32,
+    pub wheel: i16,
+    pub reserved2: u16,
+    pub x: f64,
+    pub y: f64,
+    pub flags: u32,
+}
+#[cfg(target_os = "trueos")]
+unsafe extern "C" {
+    pub(crate) fn trueos_cabi_input_read_cursor_events_since(
+        seq: u64,
+        out: *mut CursorEvent,
+        cap: u32,
+        next: *mut u64,
+        dropped: *mut u32,
+    ) -> u32;
+    pub(crate) fn trueos_cabi_input_read_keyboard_output_since(
+        seq: u64,
+        out: *mut KeyboardOutputEvent,
+        cap: u32,
+        next: *mut u64,
+        dropped: *mut u32,
+    ) -> u32;
+}
+#[cfg(not(target_os = "trueos"))]
+pub(crate) unsafe fn trueos_cabi_input_read_cursor_events_since(
+    _: u64,
+    _: *mut CursorEvent,
+    _: u32,
+    _: *mut u64,
+    _: *mut u32,
+) -> u32 {
+    0
+}
+#[cfg(not(target_os = "trueos"))]
+pub(crate) unsafe fn trueos_cabi_input_read_keyboard_output_since(
+    _: u64,
+    _: *mut KeyboardOutputEvent,
+    _: u32,
+    _: *mut u64,
+    _: *mut u32,
+) -> u32 {
+    0
 }

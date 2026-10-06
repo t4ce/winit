@@ -43,3 +43,93 @@ RUSTC=/home/t4ce/Repos/TRUEOS-Rust-Toolchain-nightly-2026-07-10/bin/rustc \
 This backend targets Winit 0.31. It does not make applications built against
 the distinct Winit 0.30 API, including the current Alacritty checkout, source
 compatible by itself.
+
+## Input and multiple combos
+
+The existing Winit callback API remains unchanged. UI4 routes window keyboard,
+pointer (including tablet/eye-tracker positions), wheel, and pan events. All
+keyboard/pointer/pan events now carry process-local `DeviceId`s; resolve them
+with `winit::platform::trueos::device_source(id)` to recover the full controller,
+slot, endpoint and device kind. IDs are not combo IDs, and rebinding a combo does
+not change endpoint identity. Keyboard modifiers are the union of the keyboards
+active in that window. Device-loss releases retain their originating device ID.
+
+`listen_device_events` supports `Always`, `WhenFocused` (default), and `Never`.
+Independent host sequence readers deliver physical keyboard keys, wheel,
+buttons, and explicitly supplied relative cursor reports to `device_event`.
+Mouse motion uses the signed relative report even at desktop edges; absolute
+coordinates are never misreported as raw motion. Readers discard the initial
+backlog and process at most 256 records per stream per iteration. Queue loss
+logs a warning and releases tracked held inputs. Absolute-only pointing devices
+remain available through window events and the native interface.
+
+Enable native routed records on each window where needed:
+
+```rust,ignore
+use winit::platform::trueos::{InputEvent, WindowExtTrueOS};
+
+window.trueos_capture_input(true);
+// In about_to_wait, or after a standard window input callback:
+let batch = window.trueos_take_input();
+if batch.dropped != 0 {
+    // Reset application held state and resample the native HID state.
+}
+for event in batch.events {
+    let device = event.device_id();
+    match event {
+        InputEvent::Pointer(pointer) => {
+            // pointer.combo_id, pointer.vcursor, dx/dy, buttons_down,
+            // buttons_pressed/released, local and desktop coordinates.
+        }
+        InputEvent::Keyboard(key) => {
+            // Endpoint identity, HID usage (kind 4), text, modifiers,
+            // sequences, repeat and device-loss (kind 3).
+        }
+        InputEvent::Pan(pan) => {
+            // Combo identity, endpoint and begin/update/end deltas.
+        }
+        _ => {}
+    }
+}
+```
+
+Capture is opt-in, bounded to 1024 records per window, with an explicit loss
+counter. It does not consume standard events. Records follow backend drain
+order (keyboard, pointer, pan), not a shared hardware timestamp order. UI4's
+keyboard ABI has no combo ID; match its endpoint against the keyboard member
+of `hid::input_combos()` when a persona is needed.
+
+On TRUEOS, `winit::platform::trueos::hid` exposes the platform's VLayer input
+API directly, using its canonical types rather than a second ABI copy:
+
+- `InputCombo::request`, member binding, color, refresh and removal;
+  `input_combos()` enumerates physical/virtual collections.
+- `hid_hut_mice/keyboards/tablets()` discover endpoints and current state.
+- `hid_tablet_read()` preserves tablet data (including pressure) not represented
+  by ordinary Winit pointer events; `midi_read_v1()` has an independent sequence
+  cursor and explicit loss count.
+- `VCursor`, `VKeyboard`, and `VGamepad` request virtual devices, submit commands,
+  and release capabilities on drop. `VGamepad::snapshot()` exposes virtual
+  gamepad state. Physical gamepad samples are not currently exposed by VLayer.
+
+For example, create one independently controlled persona; repeat for N personas:
+
+```rust,ignore
+use winit::platform::trueos::hid::{InputCombo, InputComboSourceKind, VCursor, VKeyboard};
+
+let cursor = VCursor::request("player cursor")?;
+let keyboard = VKeyboard::request("player keyboard")?;
+let combo = InputCombo::request("player", InputComboSourceKind::Human, None)?;
+combo.bind_cursor(&cursor)?;
+combo.bind_keyboard(&keyboard)?;
+// Keep cursor/keyboard alive; submit through their capability-backed methods.
+// Bind a tablet endpoint and gamepad independently when available.
+// Removing a combo removes its identity, not its member devices.
+```
+
+One combo holds at most one device of each supported class, matching VLayer's
+contract. Multiple combos work concurrently; they are not collapsed into a
+single synthetic keyboard or cursor. MIDI and tablet details stay in the native
+interface because Winit has no standard MIDI/gamepad/pressure event equivalent.
+The native namespace follows the platform VLayer API; standard Winit types and
+callbacks retain their existing signatures.

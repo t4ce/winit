@@ -29,6 +29,7 @@ pub(crate) struct WindowInner {
     pub redraws: Arc<Mutex<VecDeque<WindowId>>>,
     pub pending_window_events: Arc<Mutex<VecDeque<(WindowId, winit_core::event::WindowEvent)>>>,
     pub proxy: Arc<EventLoopProxy>,
+    pub input: Mutex<crate::input_ext::InputQueue>,
     pub keyboard: Mutex<crate::input::KeyboardState>,
 }
 #[derive(Debug)]
@@ -97,6 +98,7 @@ impl Window {
             redraws: el.redraws.clone(),
             pending_window_events: el.pending_window_events.clone(),
             proxy: el.proxy.clone(),
+            input: Mutex::new(crate::input_ext::InputQueue::default()),
             keyboard: Mutex::new(crate::input::KeyboardState::default()),
         });
         el.windows.lock().unwrap().push(Arc::downgrade(&inner));

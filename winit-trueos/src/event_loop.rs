@@ -59,6 +59,8 @@ pub struct EventLoopProxy {
 #[derive(Debug)]
 pub struct ActiveEventLoop {
     control: Mutex<ControlFlow>,
+    device_events: Mutex<DeviceEvents>,
+    device_input: Mutex<crate::device_input::DeviceInput>,
     exiting: AtomicBool,
     pub(crate) redraws: Arc<Mutex<VecDeque<WindowId>>>,
     pub(crate) pending_window_events: Arc<Mutex<VecDeque<(WindowId, WindowEvent)>>>,
@@ -85,6 +87,8 @@ impl EventLoop {
         Ok(Self {
             active: ActiveEventLoop {
                 control: Mutex::new(ControlFlow::Wait),
+                device_events: Mutex::new(DeviceEvents::default()),
+                device_input: Mutex::new(crate::device_input::DeviceInput::default()),
                 exiting: AtomicBool::new(false),
                 redraws: Arc::new(Mutex::new(VecDeque::new())),
                 pending_window_events: Arc::new(Mutex::new(VecDeque::new())),
@@ -182,6 +186,7 @@ impl EventLoop {
                 if result != 0 {
                     break;
                 }
+                window.input.lock().unwrap().push(crate::InputEvent::Keyboard(raw));
                 let events = window.keyboard.lock().unwrap().translate(&raw);
                 for event in events {
                     app.window_event(&self.active, id, event);
@@ -198,10 +203,33 @@ impl EventLoop {
                 if result != 0 {
                     break;
                 }
+                window.input.lock().unwrap().push(crate::InputEvent::Pointer(raw));
                 for event in input::pointer_events(&raw) {
                     app.window_event(&self.active, id, event);
                 }
             }
+            loop {
+                let mut raw = abi::PanEvent::default();
+                if unsafe { abi::trueos_cabi_ui4_scene_pan_event_take(window.id, &mut raw) } != 0 {
+                    break;
+                }
+                window.input.lock().unwrap().push(crate::InputEvent::Pan(raw));
+                if let Some(event) = input::pan_event(&raw) {
+                    app.window_event(&self.active, id, event);
+                }
+            }
+        }
+        let focused = windows.iter().any(|window| {
+            !window.closed.load(Ordering::Acquire) && *window.focused.lock().unwrap() == Some(true)
+        });
+        let enabled = match *self.active.device_events.lock().unwrap() {
+            DeviceEvents::Always => true,
+            DeviceEvents::WhenFocused => focused,
+            DeviceEvents::Never => false,
+        };
+        let device_events = self.active.device_input.lock().unwrap().poll(enabled);
+        for (id, event) in device_events {
+            app.device_event(&self.active, Some(id), event);
         }
         // Drain before callbacks. A redraw requested during a callback belongs
         // to the next iteration and cannot deadlock on this queue's mutex.
@@ -310,7 +338,9 @@ impl CoreActiveEventLoop for ActiveEventLoop {
     fn primary_monitor(&self) -> Option<MonitorHandle> {
         None
     }
-    fn listen_device_events(&self, _: DeviceEvents) {}
+    fn listen_device_events(&self, mode: DeviceEvents) {
+        *self.device_events.lock().unwrap() = mode;
+    }
     fn system_theme(&self) -> Option<Theme> {
         None
     }
@@ -367,6 +397,7 @@ mod tests {
                 redraws: loop_.active.redraws.clone(),
                 pending_window_events: loop_.active.pending_window_events.clone(),
                 proxy: loop_.active.proxy.clone(),
+                input: Mutex::new(crate::input_ext::InputQueue::default()),
                 keyboard: Mutex::new(input::KeyboardState::default()),
             }),
         };

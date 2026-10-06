@@ -89,7 +89,7 @@ pub(crate) fn keyboard_event(raw: &KeyboardOutputEvent) -> Option<WindowEvent> {
     };
     let text = if state.is_pressed() { text } else { None };
     Some(WindowEvent::KeyboardInput {
-        device_id: None,
+        device_id: Some(crate::input_ext::keyboard_device(raw)),
         event: KeyEvent {
             physical_key: PhysicalKey::Unidentified(NativeKeyCode::Unidentified),
             logical_key,
@@ -415,7 +415,7 @@ fn physical_event(raw: &KeyboardOutputEvent) -> Option<WindowEvent> {
         _ => KeyLocation::Standard,
     };
     Some(WindowEvent::KeyboardInput {
-        device_id: None,
+        device_id: Some(crate::input_ext::keyboard_device(raw)),
         is_synthetic: raw.flags & 2 != 0,
         event: KeyEvent {
             physical_key: physical_key(raw.key_code),
@@ -436,6 +436,7 @@ fn physical_event(raw: &KeyboardOutputEvent) -> Option<WindowEvent> {
 pub(crate) struct KeyboardState {
     held: std::collections::BTreeMap<(u32, u32, u32, u16), KeyEvent>,
     modifiers: Modifiers,
+    device_modifiers: std::collections::BTreeMap<(u32, u32, u32), u8>,
 }
 
 impl KeyboardState {
@@ -454,7 +455,9 @@ impl KeyboardState {
                     event.text = None;
                     event.text_with_all_modifiers = None;
                     events.push(WindowEvent::KeyboardInput {
-                        device_id: None,
+                        device_id: Some(crate::input_ext::device_id(crate::InputDevice::keyboard(
+                            controller, slot, endpoint,
+                        ))),
                         event,
                         is_synthetic: true,
                     });
@@ -463,16 +466,24 @@ impl KeyboardState {
                     true
                 }
             });
-            if self.held.is_empty() && self.modifiers != Modifiers::default() {
-                self.modifiers = Modifiers::default();
-                events.push(WindowEvent::ModifiersChanged(self.modifiers));
+            self.device_modifiers.retain(|&endpoint, _| {
+                !all && endpoint != (raw.controller_id, raw.slot_id, raw.ep_target)
+            });
+            let next =
+                modifiers(self.device_modifiers.values().fold(0, |bits, value| bits | value));
+            if self.modifiers != next {
+                self.modifiers = next;
+                events.push(WindowEvent::ModifiersChanged(next));
             }
             return events;
         }
         let Some(mut translated) = keyboard_event(raw) else {
             return events;
         };
-        let next_modifiers = modifiers(raw.modifiers);
+        self.device_modifiers
+            .insert((raw.controller_id, raw.slot_id, raw.ep_target), raw.modifiers);
+        let next_modifiers =
+            modifiers(self.device_modifiers.values().fold(0, |bits, value| bits | value));
         if self.modifiers != next_modifiers {
             self.modifiers = next_modifiers;
             events.push(WindowEvent::ModifiersChanged(next_modifiers));
@@ -500,7 +511,7 @@ pub(crate) fn pointer_events(raw: &PointerEvent) -> Vec<WindowEvent> {
     let position = PhysicalPosition::new(f64::from(raw.local_x), f64::from(raw.local_y));
     let mouse = matches!(raw.hid_kind, 0 | 2);
     let mut events = vec![WindowEvent::PointerMoved {
-        device_id: None,
+        device_id: Some(crate::input_ext::pointer_device(raw)),
         position,
         primary: true,
         source: if mouse { PointerSource::Mouse } else { PointerSource::Unknown },
@@ -520,15 +531,13 @@ pub(crate) fn pointer_events(raw: &PointerEvent) -> Vec<WindowEvent> {
                     2 => MouseButton::Middle,
                     3 => MouseButton::Back,
                     4 => MouseButton::Forward,
-                    other => {
-                        MouseButton::try_from_u8((other + 1) as u8).unwrap_or(MouseButton::Back)
-                    },
+                    other => MouseButton::try_from_u8(other as u8).expect("button bit is in 0..32"),
                 })
             } else {
                 ButtonSource::Unknown(bit + 1)
             };
             events.push(WindowEvent::PointerButton {
-                device_id: None,
+                device_id: Some(crate::input_ext::pointer_device(raw)),
                 state,
                 position,
                 primary: true,
@@ -539,7 +548,7 @@ pub(crate) fn pointer_events(raw: &PointerEvent) -> Vec<WindowEvent> {
     }
     if raw.wheel != 0 {
         events.push(WindowEvent::MouseWheel {
-            device_id: None,
+            device_id: Some(crate::input_ext::pointer_device(raw)),
             delta: MouseScrollDelta::LineDelta(0.0, raw.wheel as f32),
             phase: TouchPhase::Moved,
         });
@@ -632,6 +641,56 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_keyboard_modifiers_and_device_loss_are_independent() {
+        let mut state = KeyboardState::default();
+        for (slot_id, key_code, modifiers) in [(1, 225, 2), (2, 224, 1)] {
+            state.translate(&KeyboardOutputEvent {
+                slot_id,
+                key_code,
+                modifiers,
+                kind: 4,
+                flags: 1,
+                ..Default::default()
+            });
+        }
+        assert!(state.modifiers.state().shift_key());
+        assert!(state.modifiers.state().control_key());
+        state.translate(&KeyboardOutputEvent { slot_id: 2, kind: 3, ..Default::default() });
+        assert!(state.modifiers.state().shift_key());
+        assert!(!state.modifiers.state().control_key());
+    }
+
+    #[test]
+    fn all_mouse_buttons_keep_their_indices_and_device_identity() {
+        for bit in 0..32 {
+            let raw = PointerEvent {
+                slot_id: 12,
+                hid_kind: 2,
+                buttons_pressed: 1 << bit,
+                ..Default::default()
+            };
+            let events = pointer_events(&raw);
+            assert!(matches!(events[1], WindowEvent::PointerButton {
+                button: ButtonSource::Mouse(button), device_id: Some(id), ..
+            } if button as u8 == bit && crate::device_source(id).unwrap().slot_id == 12));
+        }
+    }
+
+    #[test]
+    fn pan_phases_deltas_and_unknown_phase() {
+        for (phase, expected) in
+            [(1, TouchPhase::Started), (2, TouchPhase::Moved), (3, TouchPhase::Ended)]
+        {
+            let raw = crate::PanEvent { phase, dx: -4, dy: 8, ..Default::default() };
+            assert!(
+                matches!(pan_event(&raw), Some(WindowEvent::PanGesture { delta, phase, device_id: Some(_), })
+                if delta == PhysicalPosition::new(-4.0, 8.0) && phase == expected)
+            );
+        }
+        assert!(pan_event(&crate::PanEvent::default()).is_none());
+    }
+
+    #[test]
     fn right_hand_modifiers_are_preserved() {
         assert_eq!(modifiers(0xf0).state(), modifiers(0x0f).state());
         assert!(modifiers(0x40).state().alt_key());
@@ -705,19 +764,39 @@ mod tests {
         assert!(
             matches!(events[0], WindowEvent::PointerMoved { position, .. } if position == PhysicalPosition::new(-3.0, 9.0))
         );
-        assert!(matches!(events[1], WindowEvent::PointerButton {
-            button: ButtonSource::Mouse(MouseButton::Left),
-            state: ElementState::Pressed,
-            ..
-        }));
-        assert!(matches!(events[2], WindowEvent::PointerButton {
-            button: ButtonSource::Mouse(MouseButton::Right),
-            state: ElementState::Released,
-            ..
-        }));
-        assert!(matches!(events[3], WindowEvent::MouseWheel {
-            delta: MouseScrollDelta::LineDelta(0.0, -2.0),
-            ..
-        }));
+        assert!(matches!(
+            events[1],
+            WindowEvent::PointerButton {
+                button: ButtonSource::Mouse(MouseButton::Left),
+                state: ElementState::Pressed,
+                ..
+            }
+        ));
+        assert!(matches!(
+            events[2],
+            WindowEvent::PointerButton {
+                button: ButtonSource::Mouse(MouseButton::Right),
+                state: ElementState::Released,
+                ..
+            }
+        ));
+        assert!(matches!(
+            events[3],
+            WindowEvent::MouseWheel { delta: MouseScrollDelta::LineDelta(0.0, -2.0), .. }
+        ));
     }
+}
+
+pub(crate) fn pan_event(raw: &crate::PanEvent) -> Option<WindowEvent> {
+    let phase = match raw.phase {
+        1 => TouchPhase::Started,
+        2 => TouchPhase::Moved,
+        3 => TouchPhase::Ended,
+        _ => return None,
+    };
+    Some(WindowEvent::PanGesture {
+        device_id: Some(crate::InputEvent::Pan(*raw).device_id()),
+        delta: PhysicalPosition::new(raw.dx as f32, raw.dy as f32),
+        phase,
+    })
 }

@@ -13,3 +13,6 @@ dpi.workspace = true
 rwh_06.workspace = true
 tracing.workspace = true
 winit-core.workspace = true
+
+[target.'cfg(target_os = "trueos")'.dependencies]
+v = { path = "../../../crates/trueos-v" }

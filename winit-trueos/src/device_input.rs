@@ -111,6 +111,7 @@ impl DeviceInput {
         // is discarded until each reader catches up, avoiding historical key presses.
         let mut cursor = [abi::CursorEvent::default(); 256];
         let mut dropped = 0;
+        let cursor_started = std::time::Instant::now();
         let count = unsafe {
             abi::trueos_cabi_input_read_cursor_events_since(
                 self.cursor_seq,
@@ -121,6 +122,7 @@ impl DeviceInput {
             )
         }
         .min(256) as usize;
+        crate::event_loop::report_slow_stage("raw cursor read", cursor_started);
         if dropped != 0 {
             events.extend(self.reset_buttons());
             tracing::warn!(dropped, "TRUEOS raw cursor reader lost records");
@@ -135,6 +137,7 @@ impl DeviceInput {
         }
         let mut keyboard = [abi::KeyboardOutputEvent::default(); 256];
         dropped = 0;
+        let keyboard_started = std::time::Instant::now();
         let count = unsafe {
             abi::trueos_cabi_input_read_keyboard_output_since(
                 self.keyboard_seq,
@@ -145,6 +148,7 @@ impl DeviceInput {
             )
         }
         .min(256) as usize;
+        crate::event_loop::report_slow_stage("raw keyboard read", keyboard_started);
         if dropped != 0 {
             events
                 .extend(self.keyboard(&abi::KeyboardOutputEvent { kind: 3, ..Default::default() }));

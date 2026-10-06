@@ -18,6 +18,16 @@ use winit_core::window::{Theme, Window as CoreWindow, WindowAttributes, WindowId
 use crate::window::WindowInner;
 use crate::{Window, abi, input};
 
+/// Measure caller wall time, including transport waits and callback work.
+/// Slow-path-only records keep normal input dispatch free of log traffic.
+pub(crate) fn report_slow_stage(stage: &'static str, started: Instant) {
+    let elapsed = started.elapsed();
+    if elapsed >= Duration::from_millis(250) {
+        tracing::warn!(target: "winit_trueos_latency", stage,
+            elapsed_us = elapsed.as_micros() as u64, "Slow TRUEOS event-loop stage");
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Ui4Connection(NonZeroU64);
 
@@ -104,6 +114,7 @@ impl EventLoop {
 }
 impl EventLoop {
     fn iteration<A: ApplicationHandler>(&self, app: &mut A, cause: StartCause, first: bool) {
+        let lifecycle_started = Instant::now();
         app.new_events(&self.active, cause);
         if first {
             app.can_create_surfaces(&self.active)
@@ -121,11 +132,13 @@ impl EventLoop {
             windows.retain(|window| window.strong_count() != 0);
             windows.iter().filter_map(std::sync::Weak::upgrade).collect::<Vec<_>>()
         };
+        report_slow_stage("lifecycle and queued callbacks", lifecycle_started);
         for window in &windows {
             if window.closed.load(Ordering::Acquire) {
                 continue;
             }
             let id = WindowId::from_raw(window.id as usize);
+            let state_started = Instant::now();
             let mut xy = [0i32; 2];
             if unsafe { abi::trueos_cabi_ui4_scene_frame_get_position(window.id, xy.as_mut_ptr()) }
                 == 0
@@ -175,6 +188,8 @@ impl EventLoop {
                     app.window_event(&self.active, id, WindowEvent::Focused(focused));
                 }
             }
+            report_slow_stage("window position, resize and focus", state_started);
+            let keyboard_started = Instant::now();
             loop {
                 let mut raw = abi::KeyboardOutputEvent::default();
                 let result = unsafe {
@@ -192,6 +207,8 @@ impl EventLoop {
                     app.window_event(&self.active, id, event);
                 }
             }
+            report_slow_stage("routed keyboard drain and callbacks", keyboard_started);
+            let pointer_started = Instant::now();
             loop {
                 let mut raw = abi::PointerEvent::default();
                 let result = unsafe {
@@ -208,6 +225,8 @@ impl EventLoop {
                     app.window_event(&self.active, id, event);
                 }
             }
+            report_slow_stage("routed pointer drain and callbacks", pointer_started);
+            let pan_started = Instant::now();
             loop {
                 let mut raw = abi::PanEvent::default();
                 if unsafe { abi::trueos_cabi_ui4_scene_pan_event_take(window.id, &mut raw) } != 0 {
@@ -218,7 +237,9 @@ impl EventLoop {
                     app.window_event(&self.active, id, event);
                 }
             }
+            report_slow_stage("routed pan drain and callbacks", pan_started);
         }
+        let device_started = Instant::now();
         let focused = windows.iter().any(|window| {
             !window.closed.load(Ordering::Acquire) && *window.focused.lock().unwrap() == Some(true)
         });
@@ -231,6 +252,8 @@ impl EventLoop {
         for (id, event) in device_events {
             app.device_event(&self.active, Some(id), event);
         }
+        report_slow_stage("raw device polling and callbacks", device_started);
+        let redraw_started = Instant::now();
         // Drain before callbacks. A redraw requested during a callback belongs
         // to the next iteration and cannot deadlock on this queue's mutex.
         let live_window_ids = windows
@@ -244,7 +267,10 @@ impl EventLoop {
                 app.window_event(&self.active, id, WindowEvent::RedrawRequested)
             }
         }
-        app.about_to_wait(&self.active)
+        report_slow_stage("redraw callbacks", redraw_started);
+        let app_started = Instant::now();
+        app.about_to_wait(&self.active);
+        report_slow_stage("application about_to_wait", app_started);
     }
 
     fn run_app_inner<A: ApplicationHandler>(&mut self, app: &mut A) {
@@ -266,8 +292,15 @@ impl EventLoop {
             };
             let was_woken = self.active.proxy.woken.load(Ordering::Acquire);
             if !was_woken && !timeout.is_zero() {
+                let wait_started = Instant::now();
                 let (lock, cvar) = &*self.active.proxy.sleeper;
                 let _ = cvar.wait_timeout(lock.lock().unwrap(), timeout).unwrap();
+                let elapsed = wait_started.elapsed();
+                if elapsed >= Duration::from_millis(250) {
+                    tracing::warn!(target: "winit_trueos_latency",
+                        requested_us = timeout.as_micros() as u64,
+                        elapsed_us = elapsed.as_micros() as u64, "Slow TRUEOS event-loop wait");
+                }
             }
             let cause = match flow {
                 ControlFlow::Poll => StartCause::Poll,

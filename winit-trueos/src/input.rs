@@ -509,7 +509,11 @@ impl KeyboardState {
 
 pub(crate) fn pointer_events(raw: &PointerEvent) -> Vec<WindowEvent> {
     let position = PhysicalPosition::new(f64::from(raw.local_x), f64::from(raw.local_y));
-    let mouse = matches!(raw.hid_kind, 0 | 2);
+    // UI4 exposes the same desktop button bits for virtual cursors, relative
+    // mice and absolute tablets (including the remote HID/UDP pointer).
+    // Map tablets to standard mouse events so ordinary Winit consumers can
+    // click as well as hover. The DeviceId/native record retains HID kind 3.
+    let mouse = matches!(raw.hid_kind, 0 | 2 | 3);
     let mut events = vec![WindowEvent::PointerMoved {
         device_id: Some(crate::input_ext::pointer_device(raw)),
         position,
@@ -662,18 +666,89 @@ mod tests {
 
     #[test]
     fn all_mouse_buttons_keep_their_indices_and_device_identity() {
-        for bit in 0..32 {
-            let raw = PointerEvent {
-                slot_id: 12,
-                hid_kind: 2,
-                buttons_pressed: 1 << bit,
-                ..Default::default()
-            };
-            let events = pointer_events(&raw);
-            assert!(matches!(events[1], WindowEvent::PointerButton {
-                button: ButtonSource::Mouse(button), device_id: Some(id), ..
-            } if button as u8 == bit && crate::device_source(id).unwrap().slot_id == 12));
+        for hid_kind in [0, 2, 3] {
+            for bit in 0..32 {
+                let raw = PointerEvent {
+                    slot_id: 12,
+                    hid_kind,
+                    buttons_pressed: 1 << bit,
+                    ..Default::default()
+                };
+                let events = pointer_events(&raw);
+                assert!(matches!(events[1], WindowEvent::PointerButton {
+                    button: ButtonSource::Mouse(button), device_id: Some(id), ..
+                } if button as u8 == bit && crate::device_source(id).unwrap() == crate::InputDevice {
+                    controller_id: 0, slot_id: 12, ep_target: 0, hid_kind,
+                }));
+            }
         }
+    }
+
+    #[test]
+    fn local_and_remote_pointers_deliver_clicks_at_their_own_positions() {
+        let local = PointerEvent {
+            controller_id: 1,
+            slot_id: 5,
+            hid_kind: 2,
+            local_x: 12,
+            local_y: 34,
+            combo_id: 7,
+            ..Default::default()
+        };
+        let remote = PointerEvent {
+            controller_id: 0x55445048,
+            slot_id: 0x55000001,
+            hid_kind: 3,
+            local_x: 210,
+            local_y: 340,
+            combo_id: 8,
+            vcursor: 1,
+            ..Default::default()
+        };
+        assert_ne!(
+            crate::input_ext::pointer_device(&local),
+            crate::input_ext::pointer_device(&remote)
+        );
+        // Both buttons can be held concurrently without merging the devices.
+        for pressed in [true, false] {
+            for source in [local, remote] {
+                let raw = PointerEvent {
+                    buttons_pressed: u32::from(pressed),
+                    buttons_released: u32::from(!pressed),
+                    ..source
+                };
+                let events = pointer_events(&raw);
+                let expected_id = crate::input_ext::pointer_device(&source);
+                let expected_position =
+                    PhysicalPosition::new(f64::from(source.local_x), f64::from(source.local_y));
+                assert_eq!(events.len(), 2);
+                assert!(
+                    matches!(events[0], WindowEvent::PointerMoved { device_id: Some(id), position, source: PointerSource::Mouse, .. }
+                    if id == expected_id && position == expected_position)
+                );
+                assert!(
+                    matches!(events[1], WindowEvent::PointerButton { device_id: Some(id), position, button: ButtonSource::Mouse(MouseButton::Left), state, .. }
+                    if id == expected_id && position == expected_position && state.is_pressed() == pressed)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_pointer_kinds_keep_their_native_buttons() {
+        let events = pointer_events(&PointerEvent {
+            hid_kind: 99,
+            buttons_pressed: 1,
+            ..Default::default()
+        });
+        assert!(matches!(events[0], WindowEvent::PointerMoved {
+            source: PointerSource::Unknown,
+            ..
+        }));
+        assert!(matches!(events[1], WindowEvent::PointerButton {
+            button: ButtonSource::Unknown(1),
+            ..
+        }));
     }
 
     #[test]
@@ -764,26 +839,20 @@ mod tests {
         assert!(
             matches!(events[0], WindowEvent::PointerMoved { position, .. } if position == PhysicalPosition::new(-3.0, 9.0))
         );
-        assert!(matches!(
-            events[1],
-            WindowEvent::PointerButton {
-                button: ButtonSource::Mouse(MouseButton::Left),
-                state: ElementState::Pressed,
-                ..
-            }
-        ));
-        assert!(matches!(
-            events[2],
-            WindowEvent::PointerButton {
-                button: ButtonSource::Mouse(MouseButton::Right),
-                state: ElementState::Released,
-                ..
-            }
-        ));
-        assert!(matches!(
-            events[3],
-            WindowEvent::MouseWheel { delta: MouseScrollDelta::LineDelta(0.0, -2.0), .. }
-        ));
+        assert!(matches!(events[1], WindowEvent::PointerButton {
+            button: ButtonSource::Mouse(MouseButton::Left),
+            state: ElementState::Pressed,
+            ..
+        }));
+        assert!(matches!(events[2], WindowEvent::PointerButton {
+            button: ButtonSource::Mouse(MouseButton::Right),
+            state: ElementState::Released,
+            ..
+        }));
+        assert!(matches!(events[3], WindowEvent::MouseWheel {
+            delta: MouseScrollDelta::LineDelta(0.0, -2.0),
+            ..
+        }));
     }
 }
 

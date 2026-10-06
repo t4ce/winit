@@ -38,6 +38,16 @@ pub struct Window {
 }
 impl Window {
     pub(crate) fn new(el: &ActiveEventLoop, a: WindowAttributes) -> Result<Self, RequestError> {
+        Self::new_with_layers(el, a, None)
+    }
+    pub(crate) fn new_with_layers(
+        el: &ActiveEventLoop,
+        a: WindowAttributes,
+        background_hz: Option<u32>,
+    ) -> Result<Self, RequestError> {
+        if background_hz.is_some_and(|hz| hz == 0 || hz > 60) {
+            return Err(NotSupportedError::new("UI4 background cadence must be 1..=60 Hz").into());
+        }
         if a.window_type() != WindowType::Window {
             return Err(NotSupportedError::new("TRUEOS UI4 supports top-level windows only").into());
         };
@@ -49,7 +59,14 @@ impl Window {
             return Err(NotSupportedError::new("zero-sized UI4 frame").into());
         };
         let id = unsafe {
-            abi::trueos_cabi_ui4_scene_frame_open_visual(p.x, p.y, s.width, s.height, 60)
+            match background_hz {
+                Some(hz) => abi::trueos_cabi_ui4_scene_frame_open_layered_v1(
+                    p.x, p.y, s.width, s.height, hz,
+                ),
+                None => {
+                    abi::trueos_cabi_ui4_scene_frame_open_visual(p.x, p.y, s.width, s.height, 60)
+                },
+            }
         };
         if id == 0 {
             return Err(NotSupportedError::new("UI4 refused the visual frame").into());

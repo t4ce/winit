@@ -92,6 +92,13 @@ unsafe extern "C" {
         h: u32,
         hz: u32,
     ) -> u32;
+    pub(crate) fn trueos_cabi_ui4_scene_frame_open_layered_v1(
+        x: i32,
+        y: i32,
+        w: u32,
+        h: u32,
+        hz: u32,
+    ) -> u32;
     pub(crate) fn trueos_cabi_ui4_solara_frame_close(id: u32) -> i32;
     pub(crate) fn trueos_cabi_ui4_scene_frame_set_position(id: u32, x: i32, y: i32) -> i32;
     pub(crate) fn trueos_cabi_ui4_scene_frame_get_position(id: u32, out_xy: *mut i32) -> i32;
@@ -145,6 +152,16 @@ pub(crate) unsafe fn trueos_cabi_ui4_display_validate_window_v1(_: u64, _: u32) 
 }
 #[cfg(not(target_os = "trueos"))]
 pub(crate) unsafe fn trueos_cabi_ui4_scene_frame_open_visual(
+    _: i32,
+    _: i32,
+    _: u32,
+    _: u32,
+    _: u32,
+) -> u32 {
+    0
+}
+#[cfg(not(target_os = "trueos"))]
+pub(crate) unsafe fn trueos_cabi_ui4_scene_frame_open_layered_v1(
     _: i32,
     _: i32,
     _: u32,

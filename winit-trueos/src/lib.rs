@@ -53,3 +53,25 @@ impl WindowExtTrueOS for Window {
         self.inner.input.lock().unwrap().take()
     }
 }
+
+/// Opt in to one input window with independently writable scene and UI layers.
+/// Standard `create_window` continues to create a single visual frame.
+pub trait ActiveEventLoopExtTrueOS {
+    fn create_layered_window(
+        &self,
+        attributes: winit_core::window::WindowAttributes,
+        background_hz: u32,
+    ) -> Result<Box<dyn CoreWindow>, winit_core::error::RequestError>;
+}
+impl ActiveEventLoopExtTrueOS for dyn winit_core::event_loop::ActiveEventLoop + '_ {
+    fn create_layered_window(
+        &self,
+        attributes: winit_core::window::WindowAttributes,
+        background_hz: u32,
+    ) -> Result<Box<dyn CoreWindow>, winit_core::error::RequestError> {
+        let event_loop =
+            self.cast_ref::<ActiveEventLoop>().expect("non-TRUEOS event loop on TRUEOS");
+        Window::new_with_layers(event_loop, attributes, Some(background_hz))
+            .map(|window| Box::new(window) as Box<dyn CoreWindow>)
+    }
+}

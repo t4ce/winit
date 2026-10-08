@@ -172,6 +172,7 @@ impl EventLoop {
                     let size = dpi::PhysicalSize::new(raw.width, raw.height);
                     *window.size.lock().unwrap() = size;
                     app.window_event(&self.active, id, WindowEvent::SurfaceResized(size));
+                    window.redraws.lock().unwrap().push_back(id);
                 }
             }
             if let Some(state) = {
@@ -181,6 +182,15 @@ impl EventLoop {
                     && state.version == abi::WINDOW_STATE_V1_VERSION)
                     .then_some(state)
             } {
+                // A dock may change mode without changing pixel extent. Give
+                // the app a callback in which to query fullscreen/maximize state.
+                let maximized = state.reserved[0] != 0;
+                let mut previous_maximized = window.maximized.lock().unwrap();
+                if *previous_maximized != maximized {
+                    *previous_maximized = maximized;
+                    window.redraws.lock().unwrap().push_back(id);
+                }
+                drop(previous_maximized);
                 let focused = state.focused != 0;
                 let mut previous = window.focused.lock().unwrap();
                 if previous.replace(focused) != Some(focused) {
@@ -426,6 +436,7 @@ mod tests {
                 pending_resize: Mutex::new(None),
                 position: Mutex::new(dpi::PhysicalPosition::new(0, 0)),
                 focused: Mutex::new(None),
+                maximized: Mutex::new(false),
                 closed: AtomicBool::new(false),
                 redraws: loop_.active.redraws.clone(),
                 pending_window_events: loop_.active.pending_window_events.clone(),

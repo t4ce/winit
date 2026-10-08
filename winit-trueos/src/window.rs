@@ -25,6 +25,7 @@ pub(crate) struct WindowInner {
     pub pending_resize: Mutex<Option<crate::abi::ResizeEvent>>,
     pub position: Mutex<PhysicalPosition<i32>>,
     pub focused: Mutex<Option<bool>>,
+    pub maximized: Mutex<bool>,
     pub closed: AtomicBool,
     pub redraws: Arc<Mutex<VecDeque<WindowId>>>,
     pub pending_window_events: Arc<Mutex<VecDeque<(WindowId, winit_core::event::WindowEvent)>>>,
@@ -111,6 +112,7 @@ impl Window {
             pending_resize: Mutex::new(None),
             position: Mutex::new(p),
             focused: Mutex::new(None),
+            maximized: Mutex::new(false),
             closed: AtomicBool::new(false),
             redraws: el.redraws.clone(),
             pending_window_events: el.pending_window_events.clone(),
@@ -121,7 +123,11 @@ impl Window {
         el.windows.lock().unwrap().push(Arc::downgrade(&inner));
         inner.redraws.lock().unwrap().push_back(WindowId::from_raw(id as usize));
         inner.proxy.wake_up();
-        Ok(Self { inner })
+        let window = Self { inner };
+        if a.fullscreen.is_some() || a.maximized {
+            window.set_maximized(true);
+        }
+        Ok(window)
     }
     pub fn trueos_window_id(&self) -> u32 {
         self.inner.id
@@ -256,13 +262,19 @@ impl CoreWindow for Window {
     fn is_minimized(&self) -> Option<bool> {
         None
     }
-    fn set_maximized(&self, _: bool) {}
-    fn is_maximized(&self) -> bool {
-        false
+    fn set_maximized(&self, maximized: bool) {
+        self.update_state(|state| state.reserved[1] = if maximized { 1 } else { 2 });
+        self.inner.proxy.wake_up();
     }
-    fn set_fullscreen(&self, _: Option<Fullscreen>) {}
+    fn is_maximized(&self) -> bool {
+        self.state().is_some_and(|state| state.reserved[0] != 0)
+    }
+    fn set_fullscreen(&self, fullscreen: Option<Fullscreen>) {
+        // UI4 top-center docking is the output's borderless fullscreen mode.
+        self.set_maximized(fullscreen.is_some());
+    }
     fn fullscreen(&self) -> Option<Fullscreen> {
-        None
+        self.is_maximized().then_some(Fullscreen::Borderless(None))
     }
     fn set_decorations(&self, _: bool) {}
     fn is_decorated(&self) -> bool {

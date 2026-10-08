@@ -445,6 +445,26 @@ mod tests {
     #[test]
     fn redraws_are_coalesced_and_drained_before_callbacks() {
         let loop_ = EventLoop::new(&PlatformSpecificEventLoopAttributes::default()).unwrap();
+        // Ordinary and explicitly layered windows share the exclusive Winit ABI.
+        // The host stub records the open call and refuses allocation.
+        assert!(Window::new(&loop_.active, WindowAttributes::default()).is_err());
+        abi::TEST_FRAME_OPEN.with(|state| {
+            assert_eq!(*state.borrow(), Some((0, 0, 1024, 768, 60)));
+        });
+        assert!(
+            Window::new_with_layers(&loop_.active, WindowAttributes::default(), Some(30),).is_err()
+        );
+        abi::TEST_FRAME_OPEN.with(|state| {
+            assert_eq!(*state.borrow(), Some((0, 0, 1024, 768, 30)));
+            *state.borrow_mut() = None;
+        });
+        for cadence in [0, 61] {
+            assert!(
+                Window::new_with_layers(&loop_.active, WindowAttributes::default(), Some(cadence),)
+                    .is_err()
+            );
+            abi::TEST_FRAME_OPEN.with(|state| assert!(state.borrow().is_none()));
+        }
         let id = WindowId::from_raw(7);
         {
             let mut redraws = loop_.active.redraws.lock().unwrap();

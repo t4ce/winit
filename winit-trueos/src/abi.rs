@@ -87,19 +87,13 @@ unsafe extern "C" {
     pub(crate) fn trueos_cabi_ui4_display_retain_v1(connection: u64) -> i32;
     pub(crate) fn trueos_cabi_ui4_display_close_v1(connection: u64) -> i32;
     pub(crate) fn trueos_cabi_ui4_display_validate_window_v1(connection: u64, window: u32) -> i32;
-    pub(crate) fn trueos_cabi_ui4_scene_frame_open_visual(
+    /// Winit contract: triple-buffered scene behind a single UI buffer.
+    pub(crate) fn trueos_cabi_ui4_winit_frame_open_v1(
         x: i32,
         y: i32,
         w: u32,
         h: u32,
-        hz: u32,
-    ) -> u32;
-    pub(crate) fn trueos_cabi_ui4_scene_frame_open_layered_v1(
-        x: i32,
-        y: i32,
-        w: u32,
-        h: u32,
-        hz: u32,
+        background_hz: u32,
     ) -> u32;
     pub(crate) fn trueos_cabi_ui4_solara_frame_close(id: u32) -> i32;
     pub(crate) fn trueos_cabi_ui4_scene_frame_set_position(id: u32, x: i32, y: i32) -> i32;
@@ -152,24 +146,23 @@ pub(crate) unsafe fn trueos_cabi_ui4_display_close_v1(_: u64) -> i32 {
 pub(crate) unsafe fn trueos_cabi_ui4_display_validate_window_v1(_: u64, _: u32) -> i32 {
     0
 }
-#[cfg(not(target_os = "trueos"))]
-pub(crate) unsafe fn trueos_cabi_ui4_scene_frame_open_visual(
-    _: i32,
-    _: i32,
-    _: u32,
-    _: u32,
-    _: u32,
-) -> u32 {
-    0
+#[cfg(all(test, not(target_os = "trueos")))]
+std::thread_local! {
+    pub(crate) static TEST_FRAME_OPEN: std::cell::RefCell<Option<(i32, i32, u32, u32, u32)>> =
+        const { std::cell::RefCell::new(None) };
 }
 #[cfg(not(target_os = "trueos"))]
-pub(crate) unsafe fn trueos_cabi_ui4_scene_frame_open_layered_v1(
-    _: i32,
-    _: i32,
-    _: u32,
-    _: u32,
-    _: u32,
+pub(crate) unsafe fn trueos_cabi_ui4_winit_frame_open_v1(
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+    background_hz: u32,
 ) -> u32 {
+    #[cfg(test)]
+    TEST_FRAME_OPEN.with(|state| *state.borrow_mut() = Some((x, y, w, h, background_hz)));
+    #[cfg(not(test))]
+    let _ = (x, y, w, h, background_hz);
     0
 }
 #[cfg(not(target_os = "trueos"))]

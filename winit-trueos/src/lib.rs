@@ -1,7 +1,8 @@
 //! TRUEOS UI4 backend.
 //!
-//! A TRUEOS window is a UI4 visual frame. UI4 owns presentation, so it does
-//! not expose a raw native graphics surface.
+//! A TRUEOS window has a triple-buffered scene behind a retained double-buffered
+//! UI layer. Released UI buffers can be scanned directly; UI4 synchronizes their
+//! producer/display ownership.
 mod abi;
 mod device_input;
 mod event_loop;
@@ -54,8 +55,8 @@ impl WindowExtTrueOS for Window {
     }
 }
 
-/// Opt in to one input window with independently writable scene and UI layers.
-/// Standard `create_window` continues to create a single visual frame.
+/// Configure the scene cadence of a window with independent scene and UI layers.
+/// All Winit windows use this contract; standard `create_window` uses 60 Hz.
 pub trait ActiveEventLoopExtTrueOS {
     fn create_layered_window(
         &self,

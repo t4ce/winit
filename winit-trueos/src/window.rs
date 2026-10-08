@@ -61,14 +61,13 @@ impl Window {
             return Err(NotSupportedError::new("zero-sized UI4 frame").into());
         };
         let id = unsafe {
-            match background_hz {
-                Some(hz) => abi::trueos_cabi_ui4_scene_frame_open_layered_v1(
-                    p.x, p.y, s.width, s.height, hz,
-                ),
-                None => {
-                    abi::trueos_cabi_ui4_scene_frame_open_visual(p.x, p.y, s.width, s.height, 60)
-                },
-            }
+            abi::trueos_cabi_ui4_winit_frame_open_v1(
+                p.x,
+                p.y,
+                s.width,
+                s.height,
+                background_hz.unwrap_or(60),
+            )
         };
         if id == 0 {
             return Err(NotSupportedError::new("UI4 refused the visual frame").into());

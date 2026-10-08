@@ -23,6 +23,7 @@ pub(crate) struct WindowInner {
     pub connection: Arc<Ui4Connection>,
     pub size: Mutex<PhysicalSize<u32>>,
     pub pending_resize: Mutex<Option<crate::abi::ResizeEvent>>,
+    pub resize_failures: Mutex<u64>,
     pub position: Mutex<PhysicalPosition<i32>>,
     pub focused: Mutex<Option<bool>>,
     pub maximized: Mutex<bool>,
@@ -110,6 +111,7 @@ impl Window {
             connection: el.connection.clone(),
             size: Mutex::new(s),
             pending_resize: Mutex::new(None),
+            resize_failures: Mutex::new(0),
             position: Mutex::new(p),
             focused: Mutex::new(None),
             maximized: Mutex::new(false),
@@ -144,7 +146,16 @@ impl Window {
     fn update_state(&self, update: impl FnOnce(&mut abi::WindowStateV1)) {
         let Some(mut state) = self.state() else { return };
         update(&mut state);
-        let _ = unsafe { abi::trueos_cabi_ui4_scene_window_state_set_v1(self.inner.id, &state) };
+        let status =
+            unsafe { abi::trueos_cabi_ui4_scene_window_state_set_v1(self.inner.id, &state) };
+        if status != 0 {
+            tracing::warn!(
+                window = self.inner.id,
+                status,
+                command = state.reserved[1],
+                "UI4 window state request rejected"
+            );
+        }
     }
 }
 impl CoreWindow for Window {

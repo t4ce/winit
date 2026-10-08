@@ -153,26 +153,52 @@ impl EventLoop {
             }
             let pending_resize = {
                 let mut pending = window.pending_resize.lock().unwrap();
-                if pending.is_none() {
-                    let mut raw = abi::ResizeEvent::default();
-                    if unsafe { abi::trueos_cabi_ui4_scene_resize_event_take(window.id, &mut raw) }
-                        == 0
-                    {
-                        *pending = Some(raw);
-                    }
+                // A failed allocation must not pin an obsolete dock target.
+                // The kernel coalesces its queue; always take a newer request.
+                let mut raw = abi::ResizeEvent::default();
+                if unsafe { abi::trueos_cabi_ui4_scene_resize_event_take(window.id, &mut raw) } == 0
+                {
+                    *pending = Some(raw);
+                    *window.resize_failures.lock().unwrap() = 0;
+                    tracing::info!(
+                        window = window.id,
+                        width = raw.width,
+                        height = raw.height,
+                        "UI4 resize received"
+                    );
                 }
                 *pending
             };
             if let Some(raw) = pending_resize {
-                if unsafe {
+                let status = unsafe {
                     abi::trueos_cabi_ui4_scene_frame_resize(window.id, raw.width, raw.height)
-                } == 0
-                {
+                };
+                if status == 0 {
                     *window.pending_resize.lock().unwrap() = None;
+                    *window.resize_failures.lock().unwrap() = 0;
+                    tracing::info!(
+                        window = window.id,
+                        width = raw.width,
+                        height = raw.height,
+                        "UI4 resize staged; delivering SurfaceResized"
+                    );
                     let size = dpi::PhysicalSize::new(raw.width, raw.height);
                     *window.size.lock().unwrap() = size;
                     app.window_event(&self.active, id, WindowEvent::SurfaceResized(size));
                     window.redraws.lock().unwrap().push_back(id);
+                } else {
+                    let mut failures = window.resize_failures.lock().unwrap();
+                    *failures = failures.saturating_add(1);
+                    if *failures == 1 || failures.is_power_of_two() {
+                        tracing::warn!(
+                            window = window.id,
+                            width = raw.width,
+                            height = raw.height,
+                            status,
+                            attempts = *failures,
+                            "UI4 resize not staged; app still reports previous size"
+                        );
+                    }
                 }
             }
             if let Some(state) = {
@@ -434,6 +460,7 @@ mod tests {
                 connection: loop_.active.connection.clone(),
                 size: Mutex::new(dpi::PhysicalSize::new(1, 1)),
                 pending_resize: Mutex::new(None),
+                resize_failures: Mutex::new(0),
                 position: Mutex::new(dpi::PhysicalPosition::new(0, 0)),
                 focused: Mutex::new(None),
                 maximized: Mutex::new(false),
@@ -447,6 +474,51 @@ mod tests {
         };
         window.request_redraw();
         assert!(loop_.active.proxy.woken.load(Ordering::Acquire));
+        // Exercise real iteration: a failed fullscreen allocation must yield
+        // to a newer small resize and deliver resize before its redraw.
+        #[derive(Default)]
+        struct ResizeApp(Vec<&'static str>);
+        impl ApplicationHandler for ResizeApp {
+            fn can_create_surfaces(&mut self, _: &dyn CoreActiveEventLoop) {}
+            fn window_event(
+                &mut self,
+                _: &dyn CoreActiveEventLoop,
+                _: WindowId,
+                event: WindowEvent,
+            ) {
+                match event {
+                    WindowEvent::SurfaceResized(size) => {
+                        assert_eq!(size, dpi::PhysicalSize::new(640, 360));
+                        self.0.push("resize");
+                    },
+                    WindowEvent::RedrawRequested => self.0.push("redraw"),
+                    _ => {},
+                }
+            }
+        }
+        loop_.active.windows.lock().unwrap().push(Arc::downgrade(&window.inner));
+        loop_.drain_redraws();
+        let mut app = ResizeApp::default();
+        abi::TEST_RESIZE.with(|state| {
+            *state.borrow_mut() =
+                (Some(abi::ResizeEvent { width: 2560, height: 1440, ..Default::default() }), -5)
+        });
+        loop_.iteration(&mut app, StartCause::Poll, false);
+        assert!(app.0.is_empty());
+        assert_eq!(window.surface_size(), dpi::PhysicalSize::new(1, 1));
+        assert!(window.inner.pending_resize.lock().unwrap().is_some());
+        // No new request retains the failed target for retry.
+        loop_.iteration(&mut app, StartCause::Poll, false);
+        assert!(app.0.is_empty());
+        abi::TEST_RESIZE.with(|state| {
+            *state.borrow_mut() =
+                (Some(abi::ResizeEvent { width: 640, height: 360, ..Default::default() }), 0)
+        });
+        loop_.iteration(&mut app, StartCause::Poll, false);
+        assert_eq!(app.0, vec!["resize", "redraw"]);
+        assert_eq!(window.surface_size(), dpi::PhysicalSize::new(640, 360));
+        assert!(window.inner.pending_resize.lock().unwrap().is_none());
+        abi::TEST_RESIZE.with(|state| *state.borrow_mut() = (None, -5));
         drop(window);
         assert_eq!(
             loop_

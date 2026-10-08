@@ -184,8 +184,16 @@ pub(crate) unsafe fn trueos_cabi_ui4_scene_frame_set_position(_: u32, _: i32, _:
 pub(crate) unsafe fn trueos_cabi_ui4_scene_frame_get_position(_: u32, _: *mut i32) -> i32 {
     -5
 }
+#[cfg(all(test, not(target_os = "trueos")))]
+std::thread_local! {
+    pub(crate) static TEST_RESIZE: std::cell::RefCell<(Option<ResizeEvent>, i32)> =
+        const { std::cell::RefCell::new((None, -5)) };
+}
 #[cfg(not(target_os = "trueos"))]
 pub(crate) unsafe fn trueos_cabi_ui4_scene_frame_resize(_: u32, _: u32, _: u32) -> i32 {
+    #[cfg(test)]
+    return TEST_RESIZE.with(|state| state.borrow().1);
+    #[cfg(not(test))]
     -5
 }
 #[cfg(not(target_os = "trueos"))]
@@ -193,7 +201,13 @@ pub(crate) unsafe fn trueos_cabi_ui4_scene_frame_set_escape_key_action(_: u32, _
     -5
 }
 #[cfg(not(target_os = "trueos"))]
-pub(crate) unsafe fn trueos_cabi_ui4_scene_resize_event_take(_: u32, _: *mut ResizeEvent) -> i32 {
+pub(crate) unsafe fn trueos_cabi_ui4_scene_resize_event_take(_: u32, out: *mut ResizeEvent) -> i32 {
+    #[cfg(test)]
+    if let Some(event) = TEST_RESIZE.with(|state| state.borrow_mut().0.take()) {
+        unsafe { out.write(event) };
+        return 0;
+    }
+    let _ = out;
     1
 }
 #[cfg(not(target_os = "trueos"))]

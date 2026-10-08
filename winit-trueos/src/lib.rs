@@ -20,8 +20,21 @@ pub use event_loop::{
 pub use input::{physicalkey_to_scancode, scancode_to_physicalkey};
 pub use window::Window;
 use winit_core::window::Window as CoreWindow;
+/// Content coordinates within a full-sized UI4 allocation. Empty margins need no scene draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContentViewport {
+    pub position: dpi::PhysicalPosition<u32>,
+    pub size: dpi::PhysicalSize<u32>,
+}
 pub trait WindowExtTrueOS {
     fn trueos_window_id(&self) -> u32;
+    /// App-owned content policy. The backing frame and SurfaceResized remain full-sized.
+    /// None restores unrestricted resizing. Both ratio dimensions must be nonzero.
+    fn trueos_content_viewport(&self) -> ContentViewport;
+    fn trueos_set_resize_aspect_ratio(
+        &self,
+        ratio: Option<dpi::PhysicalSize<u32>>,
+    ) -> Result<(), winit_core::error::RequestError>;
     /// Enable a bounded copy of routed UI4 input alongside standard Winit events.
     /// Disabled by default. Disabling clears the queue and loss counter.
     fn trueos_capture_input(&self, enabled: bool);
@@ -30,6 +43,18 @@ pub trait WindowExtTrueOS {
     fn trueos_take_input(&self) -> InputBatch;
 }
 impl WindowExtTrueOS for dyn CoreWindow + '_ {
+    fn trueos_content_viewport(&self) -> ContentViewport {
+        self.cast_ref::<Window>().expect("non-TRUEOS window on TRUEOS").trueos_content_viewport()
+    }
+    fn trueos_set_resize_aspect_ratio(
+        &self,
+        ratio: Option<dpi::PhysicalSize<u32>>,
+    ) -> Result<(), winit_core::error::RequestError> {
+        self.cast_ref::<Window>()
+            .expect("non-TRUEOS window on TRUEOS")
+            .trueos_set_resize_aspect_ratio(ratio)
+    }
+
     fn trueos_capture_input(&self, enabled: bool) {
         self.cast_ref::<Window>()
             .expect("non-TRUEOS window on TRUEOS")
@@ -44,6 +69,32 @@ impl WindowExtTrueOS for dyn CoreWindow + '_ {
 }
 
 impl WindowExtTrueOS for Window {
+    fn trueos_content_viewport(&self) -> ContentViewport {
+        let surface = *self.inner.size.lock().unwrap();
+        let size = window::fit_resize(surface, *self.inner.resize_aspect_ratio.lock().unwrap());
+        ContentViewport {
+            position: dpi::PhysicalPosition::new(
+                (surface.width - size.width) / 2,
+                (surface.height - size.height) / 2,
+            ),
+            size,
+        }
+    }
+
+    fn trueos_set_resize_aspect_ratio(
+        &self,
+        ratio: Option<dpi::PhysicalSize<u32>>,
+    ) -> Result<(), winit_core::error::RequestError> {
+        if ratio.is_some_and(|ratio| ratio.width == 0 || ratio.height == 0) {
+            return Err(winit_core::error::NotSupportedError::new(
+                "resize aspect dimensions must be nonzero",
+            )
+            .into());
+        }
+        *self.inner.resize_aspect_ratio.lock().unwrap() = ratio;
+        Ok(())
+    }
+
     fn trueos_window_id(&self) -> u32 {
         self.trueos_window_id()
     }

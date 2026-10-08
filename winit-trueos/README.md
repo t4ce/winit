@@ -44,6 +44,20 @@ This backend targets Winit 0.31. It does not make applications built against
 the distinct Winit 0.30 API, including the current Alacritty checkout, source
 compatible by itself.
 
+## Aspect-preserving content
+
+`WindowExtTrueOS::trueos_set_resize_aspect_ratio(Some(PhysicalSize::new(16, 9)))`
+opts one window into a centered, aspect-preserving content viewport.
+`trueos_content_viewport()` returns its physical position and size; `None`
+restores unrestricted content sizing. Both ratio dimensions must be nonzero.
+
+`surface_size()`, `SurfaceResized`, and both UI4 backing allocations retain the
+full offered extent. The application lays out and draws only inside the content
+viewport and subtracts its position when mapping pointer coordinates. Winit
+leaves standard input coordinates in the full window's coordinate system.
+Unused margins require initialization when storage is allocated, then can stay
+untouched through retained region rendering.
+
 ## Input and multiple combos
 
 The existing Winit callback API remains unchanged. UI4 routes window keyboard,

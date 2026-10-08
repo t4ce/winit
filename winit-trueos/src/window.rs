@@ -24,6 +24,7 @@ pub(crate) struct WindowInner {
     pub size: Mutex<PhysicalSize<u32>>,
     pub pending_resize: Mutex<Option<crate::abi::ResizeEvent>>,
     pub resize_failures: Mutex<u64>,
+    pub resize_aspect_ratio: Mutex<Option<PhysicalSize<u32>>>,
     pub position: Mutex<PhysicalPosition<i32>>,
     pub focused: Mutex<Option<bool>>,
     pub maximized: Mutex<bool>,
@@ -111,6 +112,7 @@ impl Window {
             size: Mutex::new(s),
             pending_resize: Mutex::new(None),
             resize_failures: Mutex::new(0),
+            resize_aspect_ratio: Mutex::new(None),
             position: Mutex::new(p),
             focused: Mutex::new(None),
             maximized: Mutex::new(false),
@@ -375,5 +377,47 @@ impl Drop for Window {
             .unwrap()
             .push_back((self.id(), winit_core::event::WindowEvent::Destroyed));
         self.inner.proxy.wake_up();
+    }
+}
+
+/// Fit inside the offered extent, reducing one axis without ever exceeding it.
+pub(crate) fn fit_resize(
+    size: PhysicalSize<u32>,
+    ratio: Option<PhysicalSize<u32>>,
+) -> PhysicalSize<u32> {
+    let Some(ratio) = ratio else {
+        return size;
+    };
+    if size.width == 0 || size.height == 0 {
+        return size;
+    }
+    if u64::from(size.width) * u64::from(ratio.height)
+        > u64::from(size.height) * u64::from(ratio.width)
+    {
+        PhysicalSize::new(
+            (u64::from(size.height) * u64::from(ratio.width) / u64::from(ratio.height)).max(1)
+                as u32,
+            size.height,
+        )
+    } else {
+        PhysicalSize::new(
+            size.width,
+            (u64::from(size.width) * u64::from(ratio.height) / u64::from(ratio.width)).max(1)
+                as u32,
+        )
+    }
+}
+
+#[cfg(test)]
+mod aspect_tests {
+    use super::*;
+    #[test]
+    fn fitting_reduces_either_axis_and_keeps_unrestricted_windows_unchanged() {
+        let ratio = Some(PhysicalSize::new(16, 9));
+        assert_eq!(fit_resize(PhysicalSize::new(1280, 1440), ratio), PhysicalSize::new(1280, 720));
+        assert_eq!(fit_resize(PhysicalSize::new(2560, 720), ratio), PhysicalSize::new(1280, 720));
+        assert_eq!(fit_resize(PhysicalSize::new(2560, 1440), ratio), PhysicalSize::new(2560, 1440));
+        assert_eq!(fit_resize(PhysicalSize::new(1280, 1440), None), PhysicalSize::new(1280, 1440));
+        assert_eq!(fit_resize(PhysicalSize::new(1, 1), ratio), PhysicalSize::new(1, 1));
     }
 }

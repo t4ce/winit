@@ -481,6 +481,7 @@ mod tests {
                 size: Mutex::new(dpi::PhysicalSize::new(1, 1)),
                 pending_resize: Mutex::new(None),
                 resize_failures: Mutex::new(0),
+                resize_aspect_ratio: Mutex::new(None),
                 position: Mutex::new(dpi::PhysicalPosition::new(0, 0)),
                 focused: Mutex::new(None),
                 maximized: Mutex::new(false),
@@ -530,6 +531,8 @@ mod tests {
         // No new request retains the failed target for retry.
         loop_.iteration(&mut app, StartCause::Poll, false);
         assert!(app.0.is_empty());
+        use crate::WindowExtTrueOS;
+        window.trueos_set_resize_aspect_ratio(Some(dpi::PhysicalSize::new(4, 3))).unwrap();
         abi::TEST_RESIZE.with(|state| {
             *state.borrow_mut() =
                 (Some(abi::ResizeEvent { width: 640, height: 360, ..Default::default() }), 0)
@@ -537,6 +540,13 @@ mod tests {
         loop_.iteration(&mut app, StartCause::Poll, false);
         assert_eq!(app.0, vec!["resize", "redraw"]);
         assert_eq!(window.surface_size(), dpi::PhysicalSize::new(640, 360));
+        let viewport = window.trueos_content_viewport();
+        assert_eq!(viewport.size, dpi::PhysicalSize::new(480, 360));
+        assert_eq!(viewport.position, dpi::PhysicalPosition::new(80, 0));
+        assert!(window.trueos_set_resize_aspect_ratio(Some(dpi::PhysicalSize::new(0, 3))).is_err());
+        assert_eq!(window.trueos_content_viewport(), viewport);
+        window.trueos_set_resize_aspect_ratio(None).unwrap();
+        assert_eq!(window.trueos_content_viewport().size, window.surface_size());
         assert!(window.inner.pending_resize.lock().unwrap().is_none());
         abi::TEST_RESIZE.with(|state| *state.borrow_mut() = (None, -5));
         drop(window);

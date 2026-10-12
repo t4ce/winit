@@ -48,6 +48,14 @@ impl Window {
         a: WindowAttributes,
         background_hz: Option<u32>,
     ) -> Result<Self, RequestError> {
+        Self::new_with_scaled_scene(el, a, background_hz, 1)
+    }
+    pub(crate) fn new_with_scaled_scene(
+        el: &ActiveEventLoop, a: WindowAttributes, background_hz: Option<u32>, scene_divisor: u32,
+    ) -> Result<Self, RequestError> {
+        if !matches!(scene_divisor, 1 | 2 | 4) {
+            return Err(NotSupportedError::new("UI4 scene divisor must be 1, 2 or 4").into());
+        }
         if background_hz.is_some_and(|hz| hz == 0 || hz > 60) {
             return Err(NotSupportedError::new("UI4 background cadence must be 1..=60 Hz").into());
         }
@@ -62,12 +70,13 @@ impl Window {
             return Err(NotSupportedError::new("zero-sized UI4 frame").into());
         };
         let id = unsafe {
-            abi::trueos_cabi_ui4_winit_frame_open_v1(
+            abi::trueos_cabi_ui4_winit_frame_open_scaled_v1(
                 p.x,
                 p.y,
                 s.width,
                 s.height,
                 background_hz.unwrap_or(60),
+                scene_divisor,
             )
         };
         if id == 0 {

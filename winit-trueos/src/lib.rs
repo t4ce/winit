@@ -114,6 +114,12 @@ pub trait ActiveEventLoopExtTrueOS {
         attributes: winit_core::window::WindowAttributes,
         background_hz: u32,
     ) -> Result<Box<dyn CoreWindow>, winit_core::error::RequestError>;
+    /// Scale only the scene backing; UI, window size and input stay physical.
+    fn create_layered_window_with_scene_divisor(
+        &self, attributes: winit_core::window::WindowAttributes,
+        background_hz: u32, scene_divisor: u32,
+    ) -> Result<Box<dyn CoreWindow>, winit_core::error::RequestError>;
+
 }
 impl ActiveEventLoopExtTrueOS for dyn winit_core::event_loop::ActiveEventLoop + '_ {
     fn create_layered_window(
@@ -126,4 +132,13 @@ impl ActiveEventLoopExtTrueOS for dyn winit_core::event_loop::ActiveEventLoop + 
         Window::new_with_layers(event_loop, attributes, Some(background_hz))
             .map(|window| Box::new(window) as Box<dyn CoreWindow>)
     }
+    fn create_layered_window_with_scene_divisor(
+        &self, attributes: winit_core::window::WindowAttributes,
+        background_hz: u32, scene_divisor: u32,
+    ) -> Result<Box<dyn CoreWindow>, winit_core::error::RequestError> {
+        let event_loop = self.cast_ref::<ActiveEventLoop>().expect("non-TRUEOS event loop on TRUEOS");
+        Window::new_with_scaled_scene(event_loop, attributes, Some(background_hz), scene_divisor)
+            .map(|window| Box::new(window) as Box<dyn CoreWindow>)
+    }
+
 }

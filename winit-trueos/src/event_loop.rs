@@ -465,6 +465,12 @@ mod tests {
             );
             abi::TEST_FRAME_OPEN.with(|state| assert!(state.borrow().is_none()));
         }
+        assert!(Window::new_streaming(&loop_.active, WindowAttributes::default()).is_err());
+        abi::TEST_STREAMING_FRAME_OPEN.with(|state| {
+            assert_eq!(*state.borrow(), Some((0,0,1024,768)));
+        });
+        // The streaming path must not allocate the layered foreground/background pair.
+        abi::TEST_FRAME_OPEN.with(|state| assert!(state.borrow().is_none()));
         let id = WindowId::from_raw(7);
         {
             let mut redraws = loop_.active.redraws.lock().unwrap();

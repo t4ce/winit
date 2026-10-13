@@ -87,7 +87,10 @@ unsafe extern "C" {
     pub(crate) fn trueos_cabi_ui4_display_retain_v1(connection: u64) -> i32;
     pub(crate) fn trueos_cabi_ui4_display_close_v1(connection: u64) -> i32;
     pub(crate) fn trueos_cabi_ui4_display_validate_window_v1(connection: u64, window: u32) -> i32;
-    /// Winit contract: triple-buffered scene behind a single UI buffer.
+    pub(crate) fn trueos_cabi_ui4_scene_frame_open_streaming(
+        x: i32, y: i32, w: u32, h: u32,
+    ) -> u32;
+    /// Layered Winit contract: triple-buffered scene behind a double-buffered UI.
     pub(crate) fn trueos_cabi_ui4_winit_frame_open_v1(
         x: i32,
         y: i32,
@@ -158,6 +161,21 @@ pub(crate) unsafe fn trueos_cabi_ui4_display_validate_window_v1(_: u64, _: u32) 
 std::thread_local! {
     pub(crate) static TEST_FRAME_OPEN: std::cell::RefCell<Option<(i32, i32, u32, u32, u32)>> =
         const { std::cell::RefCell::new(None) };
+}
+#[cfg(all(test, not(target_os = "trueos")))]
+std::thread_local! {
+    pub(crate) static TEST_STREAMING_FRAME_OPEN: std::cell::RefCell<Option<(i32, i32, u32, u32)>> =
+        const { std::cell::RefCell::new(None) };
+}
+#[cfg(not(target_os = "trueos"))]
+pub(crate) unsafe fn trueos_cabi_ui4_scene_frame_open_streaming(
+    x: i32, y: i32, w: u32, h: u32,
+) -> u32 {
+    #[cfg(test)]
+    TEST_STREAMING_FRAME_OPEN.with(|state| *state.borrow_mut() = Some((x,y,w,h)));
+    #[cfg(not(test))]
+    let _ = (x,y,w,h);
+    0
 }
 #[cfg(not(target_os = "trueos"))]
 pub(crate) unsafe fn trueos_cabi_ui4_winit_frame_open_scaled_v1(

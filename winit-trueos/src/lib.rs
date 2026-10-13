@@ -107,8 +107,14 @@ impl WindowExtTrueOS for Window {
 }
 
 /// Configure the scene cadence of a window with independent scene and UI layers.
-/// All Winit windows use this contract; standard `create_window` uses 60 Hz.
+/// Standard `create_window` uses the layered contract at 60 Hz.
 pub trait ActiveEventLoopExtTrueOS {
+    /// Create one Streaming/Triple-buffered GPU frame with no paired UI layer.
+    /// The caller renders directly to `trueos_window_id()` on demand.
+    fn create_streaming_window(
+        &self, attributes: winit_core::window::WindowAttributes,
+    ) -> Result<Box<dyn CoreWindow>, winit_core::error::RequestError>;
+
     fn create_layered_window(
         &self,
         attributes: winit_core::window::WindowAttributes,
@@ -122,6 +128,14 @@ pub trait ActiveEventLoopExtTrueOS {
 
 }
 impl ActiveEventLoopExtTrueOS for dyn winit_core::event_loop::ActiveEventLoop + '_ {
+    fn create_streaming_window(
+        &self, attributes: winit_core::window::WindowAttributes,
+    ) -> Result<Box<dyn CoreWindow>, winit_core::error::RequestError> {
+        let event_loop = self.cast_ref::<ActiveEventLoop>().expect("non-TRUEOS event loop on TRUEOS");
+        Window::new_streaming(event_loop, attributes)
+            .map(|window| Box::new(window) as Box<dyn CoreWindow>)
+    }
+
     fn create_layered_window(
         &self,
         attributes: winit_core::window::WindowAttributes,

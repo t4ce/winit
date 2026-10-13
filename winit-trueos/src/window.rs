@@ -53,6 +53,17 @@ impl Window {
     pub(crate) fn new_with_scaled_scene(
         el: &ActiveEventLoop, a: WindowAttributes, background_hz: Option<u32>, scene_divisor: u32,
     ) -> Result<Self, RequestError> {
+        Self::new_with_contract(el, a, background_hz, scene_divisor, false)
+    }
+    pub(crate) fn new_streaming(
+        el: &ActiveEventLoop, a: WindowAttributes,
+    ) -> Result<Self, RequestError> {
+        Self::new_with_contract(el, a, None, 1, true)
+    }
+    fn new_with_contract(
+        el: &ActiveEventLoop, a: WindowAttributes, background_hz: Option<u32>,
+        scene_divisor: u32, single_streaming: bool,
+    ) -> Result<Self, RequestError> {
         if !matches!(scene_divisor, 1 | 2 | 4) {
             return Err(NotSupportedError::new("UI4 scene divisor must be 1, 2 or 4").into());
         }
@@ -70,14 +81,13 @@ impl Window {
             return Err(NotSupportedError::new("zero-sized UI4 frame").into());
         };
         let id = unsafe {
-            abi::trueos_cabi_ui4_winit_frame_open_scaled_v1(
-                p.x,
-                p.y,
-                s.width,
-                s.height,
-                background_hz.unwrap_or(60),
-                scene_divisor,
-            )
+            if single_streaming {
+                abi::trueos_cabi_ui4_scene_frame_open_streaming(p.x, p.y, s.width, s.height)
+            } else {
+                abi::trueos_cabi_ui4_winit_frame_open_scaled_v1(
+                    p.x, p.y, s.width, s.height, background_hz.unwrap_or(60), scene_divisor,
+                )
+            }
         };
         if id == 0 {
             return Err(NotSupportedError::new("UI4 refused the visual frame").into());
